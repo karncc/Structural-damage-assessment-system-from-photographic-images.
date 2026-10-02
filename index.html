@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบหาปริมาณความเสียหายโครงสร้างจากภาพถ่าย (Beta)</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS for Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Sarabun', sans-serif; background-color: #f8fafc; }
+        .canvas-container {
+            position: relative; width: 100%; height: 65vh; background-color: #e2e8f0;
+            border: 2px dashed #94a3b8; border-radius: 0.75rem; overflow: hidden;
+            display: flex; justify-content: center; align-items: center;
+            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+        }
+        canvas { 
+            max-width: 100%; max-height: 100%; object-fit: contain; 
+            touch-action: none; /* Crucial for touch dragging */
+        }
+        /* Dynamic cursor classes */
+        .cursor-crosshair { cursor: crosshair; }
+        .cursor-grab { cursor: grab; }
+        .cursor-grabbing { cursor: grabbing; }
+
+        .tool-btn.active { background-color: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); }
+        .tool-btn.active .tool-icon { stroke: #2563eb; }
+
+        /* Custom Scrollbar for tables */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Toast Notification */
+        #toast-container { position: fixed; top: 20px; right: 20px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; }
+        .toast { padding: 14px 20px; border-radius: 8px; color: white; font-weight: 500; font-size: 0.875rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15); opacity: 0; transform: translateX(100%); animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards, fadeOut 0.3s 3.5s forwards; display: flex; align-items: center; gap: 8px; }
+        .toast.success { background-color: #10b981; }
+        .toast.error { background-color: #ef4444; }
+        .toast.info { background-color: #3b82f6; }
+        @keyframes slideIn { to { opacity: 1; transform: translateX(0); } }
+        @keyframes fadeOut { to { opacity: 0; transform: translateX(100%); display: none; } }
+
+        /* Custom Modal */
+        #custom-modal { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); z-index: 500; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
+        #custom-modal.active { display: flex; }
+    </style>
+</head>
+<body class="text-slate-800">
+
+<div id="toast-container"></div>
+
+<!-- Data Entry Modal -->
+<div id="custom-modal">
+    <div class="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-md transform transition-all">
+        <h3 id="modal-title" class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+            <i data-lucide="file-edit" class="w-5 h-5 text-blue-600"></i> บันทึกข้อมูล
+        </h3>
+        <div id="modal-body" class="space-y-4">
+            <!-- Dynamic inputs go here -->
+        </div>
+        <div class="mt-8 flex justify-end gap-3">
+            <button onclick="closeModal(false)" class="px-5 py-2.5 bg-slate-100 text-slate-700 font-bold rounded-lg hover:bg-slate-200 transition">ยกเลิก (ลบเส้น)</button>
+            <button onclick="closeModal(true)" class="px-5 py-2.5 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow-md shadow-blue-500/30 transition">บันทึกข้อมูล</button>
+        </div>
+    </div>
+</div>
+
+<div class="max-w-[1600px] mx-auto p-4 md:p-6 space-y-6">
+    
+    <!-- Top Bar: Project Metadata -->
+    <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 grid grid-cols-1 md:grid-cols-12 gap-5 items-end">
+        <div class="md:col-span-4 lg:col-span-3">
+            <h1 class="text-lg lg:text-xl font-bold text-slate-800 flex items-center gap-2 flex-wrap leading-tight">
+                ระบบหาปริมาณความเสียหายโครงสร้างจากภาพถ่าย
+                <span class="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-full shadow-sm">Beta</span>
+            </h1>
+            <p class="text-xs text-slate-500 mt-1.5 flex items-center gap-1"><i data-lucide="cpu" class="w-3 h-3"></i> Pure-JS Homography Engine</p>
+        </div>
+        <div class="md:col-span-3 lg:col-span-3">
+            <label class="block text-xs font-bold text-slate-600 mb-1">ชื่ออาคาร / โครงการ</label>
+            <div class="relative">
+                <i data-lucide="building" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                <input type="text" id="meta-bldg" class="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" placeholder="ระบุอาคาร">
+            </div>
+        </div>
+        <div class="md:col-span-2 lg:col-span-3">
+            <label class="block text-xs font-bold text-slate-600 mb-1">ชั้น (Floor)</label>
+            <div class="relative">
+                <i data-lucide="layers" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                <input type="text" id="meta-floor" class="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" placeholder="ระบุชั้น">
+            </div>
+        </div>
+        <div class="md:col-span-3 lg:col-span-3">
+            <label class="block text-xs font-bold text-slate-600 mb-1">ตำแหน่ง (Location)</label>
+            <div class="relative">
+                <i data-lucide="map-pin" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                <input type="text" id="meta-loc" class="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" placeholder="เช่น เสา C4">
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN WORKSPACE -->
+    <div class="grid grid-cols-1 xl:grid-cols-12 gap-6">
+        
+        <!-- Left Sidebar: Tools & Calibration -->
+        <div class="xl:col-span-3 flex flex-col gap-5">
+            
+            <!-- Setup & Image Upload -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <h2 class="font-bold text-slate-800 mb-3 text-sm flex items-center gap-2">
+                    <span class="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs">1</span> 
+                    อัพโหลดรูปภาพ
+                </h2>
+                <div class="relative">
+                    <input type="file" id="imageUpload" accept="image/*" class="w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 border border-slate-200 rounded-lg cursor-pointer transition"/>
+                </div>
+            </div>
+
+            <!-- Calibration System -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs">2</span> 
+                        การกำหนดขนาดอ้างอิง
+                    </h2>
+                </div>
+                
+                <div class="flex gap-2 mb-4 bg-slate-100 p-1.5 rounded-lg">
+                    <button class="flex-1 py-1.5 text-xs font-bold rounded-md transition bg-white shadow-sm text-indigo-700" id="tab-planar" onclick="setRefMode('planar')">ระนาบตรง (2 จุด)</button>
+                    <button class="flex-1 py-1.5 text-xs font-bold rounded-md transition text-slate-500 hover:text-slate-700" id="tab-persp" onclick="setRefMode('perspective')">มุมเอียง (4 จุด)</button>
+                </div>
+
+                <div id="cfg-planar" class="space-y-3">
+                    <div class="flex gap-2 items-center bg-slate-50 p-2 rounded-lg border border-slate-100">
+                        <label class="text-xs font-bold text-slate-600 w-16">ความยาว:</label>
+                        <input type="number" id="ref-len" value="10" class="flex-1 px-3 py-1.5 border border-slate-300 rounded text-sm focus:outline-none focus:border-indigo-500">
+                        <span class="text-xs font-bold text-slate-500">cm</span>
+                    </div>
+                    <button id="btn-cal-planar" class="w-full flex justify-center items-center gap-2 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 shadow-md shadow-indigo-500/20 transition" onclick="startCalibration()">
+                        <i data-lucide="crosshair" class="w-4 h-4"></i> เริ่มกำหนดจุดอ้างอิง
+                    </button>
+                </div>
+
+                <div id="cfg-persp" class="space-y-3 hidden">
+                    <div class="grid grid-cols-2 gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                        <div class="flex items-center gap-1">
+                            <label class="text-xs font-bold text-slate-600">กว้าง:</label>
+                            <input type="number" id="ref-w" value="10" class="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <label class="text-xs font-bold text-slate-600">ยาว:</label>
+                            <input type="number" id="ref-h" value="20" class="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:outline-none focus:border-indigo-500">
+                        </div>
+                    </div>
+                    <button id="btn-cal-persp" class="w-full flex justify-center items-center gap-2 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 shadow-md shadow-indigo-500/20 transition" onclick="startCalibration()">
+                        <i data-lucide="scan" class="w-4 h-4"></i> เริ่มกำหนดจุดมุม (4 จุด)
+                    </button>
+                </div>
+                
+                <div id="cal-status" class="mt-4 text-center text-xs font-bold text-slate-500 bg-slate-50 p-2 rounded-lg flex items-center justify-center gap-2 border border-slate-200">
+                    <i data-lucide="alert-circle" class="w-4 h-4"></i> รอการกำหนดขนาด
+                </div>
+            </div>
+
+            <!-- Measurement Tools -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex-grow">
+                <h2 class="font-bold text-slate-800 mb-3 text-sm flex items-center gap-2">
+                    <span class="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs">3</span> 
+                    เครื่องมือวัดผล (Tools)
+                </h2>
+                
+                <div class="flex flex-col gap-2">
+                    <button id="tool-crack" class="tool-btn flex items-center gap-3 px-4 py-3 text-sm font-bold border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition text-left" onclick="selectTool('crack')">
+                        <i data-lucide="activity" class="w-5 h-5 tool-icon text-red-500"></i> วัดรอยร้าว (Crack)
+                    </button>
+                    <button id="tool-area" class="tool-btn flex items-center gap-3 px-4 py-3 text-sm font-bold border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition text-left" onclick="selectTool('area')">
+                        <i data-lucide="hexagon" class="w-5 h-5 tool-icon text-yellow-500"></i> พื้นที่เสื่อมสภาพ (Area)
+                    </button>
+                    <button id="tool-rebar" class="tool-btn flex items-center gap-3 px-4 py-3 text-sm font-bold border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition text-left" onclick="selectTool('rebar')">
+                        <i data-lucide="git-commit" class="w-5 h-5 tool-icon text-green-500"></i> เหล็กเสริม (Rebar)
+                    </button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Center: Canvas Area -->
+        <div class="xl:col-span-9 relative flex flex-col min-h-[50vh]">
+            <div class="flex flex-wrap justify-between items-center mb-3 gap-3">
+                <div class="flex items-center gap-3">
+                    <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i data-lucide="monitor" class="w-4 h-4"></i> หน้าต่างปฏิบัติงาน</h2>
+                    <span id="active-tool-badge" class="px-3 py-1 text-xs font-bold bg-slate-100 text-slate-500 rounded-full border border-slate-200 shadow-sm flex items-center gap-1">
+                        โหมด: รอการตั้งค่า
+                    </span>
+                    <span id="drag-hint" class="hidden px-2 py-0.5 text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded animate-pulse">
+                        💡 สามารถคลิกค้างแล้วลากจุดเพื่อปรับแต่งได้
+                    </span>
+                </div>
+                <div id="drawing-controls" class="hidden flex gap-2">
+                    <button onclick="finishDrawing()" class="flex items-center gap-1 px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-sm shadow-emerald-500/30 transition">
+                        <i data-lucide="check" class="w-3 h-3"></i> บันทึกเส้นนี้
+                    </button>
+                    <button onclick="cancelDrawing()" class="flex items-center gap-1 px-4 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg shadow-sm transition">
+                        <i data-lucide="x" class="w-3 h-3"></i> ยกเลิก
+                    </button>
+                </div>
+            </div>
+            
+            <div class="canvas-container" id="canvas-wrapper">
+                <div id="canvas-placeholder" class="flex flex-col items-center gap-3 text-slate-400">
+                    <i data-lucide="image-plus" class="w-12 h-12 opacity-50"></i>
+                    <span class="font-bold text-sm">กรุณาอัพโหลดรูปภาพเพื่อเริ่มต้น</span>
+                </div>
+                <canvas id="main-canvas" class="hidden cursor-crosshair"></canvas>
+            </div>
+            <p class="text-xs text-slate-500 mt-3 font-medium bg-white px-3 py-2 rounded-lg border border-slate-100 shadow-sm inline-flex items-center gap-2">
+                <i data-lucide="info" class="w-4 h-4 text-blue-500"></i>
+                <span id="instruction-text">อัพโหลดรูปภาพ -> ตั้งค่าอ้างอิง -> เลือกเครื่องมือเพื่อเริ่มวัดรอยร้าว</span>
+            </p>
+        </div>
+    </div>
+
+    <!-- Dashboard / Tables -->
+    <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 mt-8">
+        <div class="flex flex-wrap justify-between items-center mb-6 gap-4">
+            <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <i data-lucide="bar-chart-2" class="w-6 h-6 text-blue-600"></i> สรุปผลการประเมินโครงสร้าง
+            </h2>
+            <button onclick="exportExcel()" class="px-5 py-2.5 bg-slate-800 text-white text-sm font-bold rounded-lg shadow-md hover:bg-slate-900 hover:shadow-lg transition flex items-center gap-2">
+                <i data-lucide="download" class="w-4 h-4"></i> Export to Excel
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-8">
+            
+            <!-- Left: Summaries -->
+            <div class="xl:col-span-4 space-y-6">
+                <!-- Summary 1: Crack Width Groups -->
+                <div class="bg-slate-50 p-1 rounded-xl border border-slate-200">
+                    <div class="bg-white rounded-lg p-4">
+                        <h3 class="font-bold text-sm text-slate-800 mb-3 flex items-center gap-2"><i data-lucide="bar-chart" class="w-4 h-4 text-blue-500"></i> สรุปความยาวแยกตามความกว้าง</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-left">
+                                <thead class="border-b-2 border-slate-100 text-slate-500 text-xs uppercase">
+                                    <tr>
+                                        <th class="px-2 py-2 font-bold">ความกว้าง</th>
+                                        <th class="px-2 py-2 text-right font-bold">ความยาวรวม (cm)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tb-summary-crack" class="divide-y divide-slate-50">
+                                    <tr><td colspan="2" class="px-2 py-4 text-center text-slate-400 text-xs">ไม่มีข้อมูล</td></tr>
+                                </tbody>
+                                <tfoot class="border-t-2 border-slate-100 font-bold">
+                                    <tr>
+                                        <td class="px-2 py-3 text-right text-xs text-slate-600">รวมทั้งหมด:</td>
+                                        <td class="px-2 py-3 text-right text-red-600 text-base" id="total-crack-len">0.00</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Summary 2: Area & Rebar Totals -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-gradient-to-br from-amber-50 to-orange-50 p-4 rounded-xl border border-amber-100 shadow-sm">
+                        <p class="text-xs text-amber-800 font-bold mb-1 flex items-center gap-1"><i data-lucide="hexagon" class="w-3 h-3"></i> รวมพื้นที่เสื่อมสภาพ</p>
+                        <p class="text-2xl font-black text-amber-600" id="total-area">0.00</p>
+                        <p class="text-xs text-amber-700/70 mt-1 font-semibold">ตร.ซม.</p>
+                    </div>
+                    <div class="bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-xl border border-green-100 shadow-sm">
+                        <p class="text-xs text-green-800 font-bold mb-1 flex items-center gap-1"><i data-lucide="git-commit" class="w-3 h-3"></i> รวมเหล็กเสริม</p>
+                        <p class="text-2xl font-black text-green-600" id="total-rebar">0.00</p>
+                        <p class="text-xs text-green-700/70 mt-1 font-semibold">เซนติเมตร</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Raw Data Tables -->
+            <div class="xl:col-span-8 space-y-5 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+                
+                <!-- Cracks Table -->
+                <div class="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                    <div class="bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 flex justify-between items-center border-b border-slate-200">
+                        <span class="flex items-center gap-2"><i data-lucide="activity" class="w-4 h-4 text-red-500"></i> รายการรอยร้าว (Cracks)</span>
+                    </div>
+                    <table class="w-full text-xs text-left bg-white">
+                        <thead class="bg-white border-b border-slate-100 text-slate-500 uppercase">
+                            <tr>
+                                <th class="px-4 py-3 font-bold">ID</th>
+                                <th class="px-4 py-3 font-bold">กว้าง(mm)</th>
+                                <th class="px-4 py-3 font-bold">ลึก(mm)</th>
+                                <th class="px-4 py-3 font-bold text-right">ยาว(cm)</th>
+                                <th class="px-4 py-3 font-bold text-center">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tb-raw-crack" class="divide-y divide-slate-50">
+                            <tr><td colspan="5" class="px-4 py-6 text-center text-slate-400">ยังไม่มีข้อมูล</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Area Table -->
+                <div class="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                    <div class="bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 flex justify-between items-center border-b border-slate-200">
+                        <span class="flex items-center gap-2"><i data-lucide="hexagon" class="w-4 h-4 text-yellow-500"></i> พื้นที่เสื่อมสภาพ (Damaged Areas)</span>
+                    </div>
+                    <table class="w-full text-xs text-left bg-white">
+                        <thead class="bg-white border-b border-slate-100 text-slate-500 uppercase">
+                            <tr>
+                                <th class="px-4 py-3 font-bold w-16">ID</th>
+                                <th class="px-4 py-3 font-bold">รายละเอียด / สาเหตุ</th>
+                                <th class="px-4 py-3 font-bold text-right">พื้นที่(ตร.ซม.)</th>
+                                <th class="px-4 py-3 font-bold text-center w-20">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tb-raw-area" class="divide-y divide-slate-50">
+                            <tr><td colspan="4" class="px-4 py-6 text-center text-slate-400">ยังไม่มีข้อมูล</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Rebar Table -->
+                <div class="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                    <div class="bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 flex justify-between items-center border-b border-slate-200">
+                        <span class="flex items-center gap-2"><i data-lucide="git-commit" class="w-4 h-4 text-green-500"></i> เหล็กเสริมที่เสื่อมสภาพ (Rebars)</span>
+                    </div>
+                    <table class="w-full text-xs text-left bg-white">
+                        <thead class="bg-white border-b border-slate-100 text-slate-500 uppercase">
+                            <tr>
+                                <th class="px-4 py-3 font-bold w-16">ID</th>
+                                <th class="px-4 py-3 font-bold">รายละเอียด</th>
+                                <th class="px-4 py-3 font-bold text-right">ยาว(cm)</th>
+                                <th class="px-4 py-3 font-bold text-center w-20">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tb-raw-rebar" class="divide-y divide-slate-50">
+                            <tr><td colspan="4" class="px-4 py-6 text-center text-slate-400">ยังไม่มีข้อมูล</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Initialize Lucide Icons
+    lucide.createIcons();
+
+    function showToast(msg, type='info') {
+        const c = document.getElementById('toast-container');
+        const t = document.createElement('div');
+        t.className = `toast ${type}`;
+        
+        let icon = 'info';
+        if(type==='success') icon = 'check-circle';
+        if(type==='error') icon = 'alert-octagon';
+        
+        t.innerHTML = `<i data-lucide="${icon}" class="w-5 h-5"></i><span>${msg}</span>`;
+        c.appendChild(t);
+        lucide.createIcons({root: t});
+        
+        setTimeout(() => { if(c.contains(t)) t.remove(); }, 4000);
+    }
+
+    // --- State Management ---
+    const State = {
+        image: null,
+        refMode: 'planar', // 'planar' | 'perspective'
+        calibrated: false,
+        calibType: null, // What successfully calibrated
+        pxPerCm: 1, 
+        H_Matrix: null, 
+        
+        mode: 'idle', // 'idle', 'calibrating', 'drawing'
+        tool: null, // 'crack', 'area', 'rebar'
+        
+        refPoints: [], 
+        currentPath: [], 
+        
+        // Drag & Drop specific
+        hoveredPointIndex: -1,
+        draggingPointIndex: -1,
+        
+        records: { crack: [], area: [], rebar: [] }
+    };
+
+    // --- Math: Homography (Gauss-Jordan) ---
+    function solveGaussJordan(A, B) {
+        let n = A.length;
+        for (let i = 0; i < n; i++) {
+            let maxEl = Math.abs(A[i][i]), maxRow = i;
+            for (let k = i + 1; k < n; k++) {
+                if (Math.abs(A[k][i]) > maxEl) { maxEl = Math.abs(A[k][i]); maxRow = k; }
+            }
+            for (let k = i; k < n; k++) { let tmp = A[maxRow][k]; A[maxRow][k] = A[i][k]; A[i][k] = tmp; }
+            let tmpB = B[maxRow]; B[maxRow] = B[i]; B[i] = tmpB;
+
+            for (let k = i + 1; k < n; k++) {
+                let c = -A[k][i] / A[i][i];
+                for (let j = i; j < n; j++) {
+                    if (i === j) A[k][j] = 0; else A[k][j] += c * A[i][j];
+                }
+                B[k] += c * B[i];
+            }
+        }
+        let x = new Array(n).fill(0);
+        for (let i = n - 1; i >= 0; i--) {
+            x[i] = B[i] / A[i][i];
+            for (let k = i - 1; k >= 0; k--) B[k] -= A[k][i] * x[i];
+        }
+        return x;
+    }
+
+    function sortRectCorners(pts) {
+        let cx = pts.reduce((s, p) => s + p.x, 0) / 4;
+        let cy = pts.reduce((s, p) => s + p.y, 0) / 4;
+        let tl = pts.reduce((a,b) => (a.x+a.y) < (b.x+b.y) ? a : b);
+        let br = pts.reduce((a,b) => (a.x+a.y) > (b.x+b.y) ? a : b);
+        let remaining = pts.filter(p => p !== tl && p !== br);
+        let tr = remaining[0].x > remaining[1].x ? remaining[0] : remaining[1];
+        let bl = remaining[0].x < remaining[1].x ? remaining[0] : remaining[1];
+        return [tl, tr, br, bl];
+    }
+
+    function calculateHomography(srcPixels, realW, realH) {
+        let sortedSrc = sortRectCorners(srcPixels);
+        let dstReal = [{x: 0, y: 0}, {x: realW, y: 0}, {x: realW, y: realH}, {x: 0, y: realH}];
+        let A = [], B = [];
+        for (let i = 0; i < 4; i++) {
+            let x = sortedSrc[i].x, y = sortedSrc[i].y;
+            let u = dstReal[i].x, v = dstReal[i].y;
+            A.push([x, y, 1, 0, 0, 0, -u*x, -u*y]); B.push(u);
+            A.push([0, 0, 0, x, y, 1, -v*x, -v*y]); B.push(v);
+        }
+        let h = solveGaussJordan(A, B);
+        return [[h[0], h[1], h[2]], [h[3], h[4], h[5]], [h[6], h[7], 1]];
+    }
+
+    function pixelToReal(px, py) {
+        if (!State.calibrated) return {x: 0, y: 0};
+        if (State.calibType === 'planar') return { x: px / State.pxPerCm, y: py / State.pxPerCm };
+        if (State.calibType === 'perspective' && State.H_Matrix) {
+            let H = State.H_Matrix;
+            let w = H[2][0]*px + H[2][1]*py + H[2][2];
+            return {
+                x: (H[0][0]*px + H[0][1]*py + H[0][2]) / w,
+                y: (H[1][0]*px + H[1][1]*py + H[1][2]) / w
+            };
+        }
+        return {x: 0, y: 0};
+    }
+
+    function dist(p1, p2) { return Math.sqrt((p1.x-p2.x)**2 + (p1.y-p2.y)**2); }
+    
+    function calculateRealLength(pixelPoints) {
+        if(pixelPoints.length < 2) return 0;
+        let len = 0;
+        let realPts = pixelPoints.map(p => pixelToReal(p.x, p.y));
+        for(let i=0; i<realPts.length-1; i++) len += dist(realPts[i], realPts[i+1]);
+        return len;
+    }
+
+    function calculateRealArea(pixelPoints) {
+        if(pixelPoints.length < 3) return 0;
+        let realPts = pixelPoints.map(p => pixelToReal(p.x, p.y));
+        let area = 0, j = realPts.length - 1;
+        for (let i = 0; i < realPts.length; i++) {
+            area += (realPts[j].x + realPts[i].x) * (realPts[j].y - realPts[i].y);
+            j = i;
+        }
+        return Math.abs(area / 2.0);
+    }
+
+    // --- STREAMING_CHUNK:Setting up canvas and UI event listeners... ---
+    const canvas = document.getElementById('main-canvas');
+    const ctx = canvas.getContext('2d');
+    let isDrawingLine = false;
+
+    document.getElementById('imageUpload').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if(!file) return;
+        const img = new Image();
+        img.onload = () => {
+            State.image = img;
+            canvas.width = img.width;
+            canvas.height = img.height;
+            document.getElementById('canvas-placeholder').classList.add('hidden');
+            canvas.classList.remove('hidden');
+            
+            // Reset state
+            State.calibrated = false; State.refPoints = [];
+            State.records = {crack: [], area: [], rebar: []};
+            State.mode = 'idle';
+            State.tool = null;
+            document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+            
+            updateCalStatus();
+            updateInstruction('ตั้งค่าอ้างอิงขนาด (ขั้นตอน 2) เพื่อความแม่นยำ');
+            render();
+            updateDashboard();
+        }
+        img.src = URL.createObjectURL(file);
+    });
+
+    window.setRefMode = function(mode) {
+        State.refMode = mode;
+        document.getElementById('cfg-planar').classList.toggle('hidden', mode !== 'planar');
+        document.getElementById('cfg-persp').classList.toggle('hidden', mode !== 'perspective');
+        
+        let tabPlanar = document.getElementById('tab-planar');
+        let tabPersp = document.getElementById('tab-persp');
+        if(mode === 'planar') {
+            tabPlanar.className = "flex-1 py-1.5 text-xs font-bold rounded-md transition bg-white shadow-sm text-indigo-700";
+            tabPersp.className = "flex-1 py-1.5 text-xs font-bold rounded-md transition text-slate-500 hover:text-slate-700";
+        } else {
+            tabPersp.className = "flex-1 py-1.5 text-xs font-bold rounded-md transition bg-white shadow-sm text-indigo-700";
+            tabPlanar.className = "flex-1 py-1.5 text-xs font-bold rounded-md transition text-slate-500 hover:text-slate-700";
+        }
+        
+        // Auto start if image is loaded to reset points
+        if(State.image && State.mode === 'calibrating') startCalibration();
+    };
+
+    function updateBadge(text, colorClass) {
+        const badge = document.getElementById('active-tool-badge');
+        badge.innerHTML = text;
+        badge.className = `px-3 py-1 text-xs font-bold rounded-full shadow-sm flex items-center gap-1 ${colorClass}`;
+    }
+    
+    function updateInstruction(text) {
+        document.getElementById('instruction-text').innerText = text;
+    }
+
+    window.startCalibration = function() {
+        if(!State.image) return showToast('กรุณาอัพโหลดรูปภาพในขั้นตอนที่ 1 ก่อน', 'error');
+        State.mode = 'calibrating';
+        State.tool = null;
+        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('drawing-controls').classList.add('hidden');
+        document.getElementById('drag-hint').classList.remove('hidden');
+        
+        // Don't clear points if we already have the correct amount, let user edit them!
+        let reqPts = State.refMode === 'planar' ? 2 : 4;
+        if(State.refPoints.length !== reqPts) {
+            State.refPoints = []; // Only clear if mismatched
+            State.calibrated = false;
+            updateCalStatus();
+        }
+        
+        updateBadge(`โหมด: กำหนดจุดอ้างอิง (${State.refPoints.length}/${reqPts})`, 'bg-indigo-100 text-indigo-700 border border-indigo-200');
+        updateInstruction('คลิกเพื่อวางจุด หรือ คลิกค้างที่จุดเดิมเพื่อลากปรับแต่ง (Drag & Drop)');
+        render();
+    };
+
+    window.selectTool = function(tool) {
+        if(!State.calibrated) return showToast('กรุณากำหนดขนาดอ้างอิงในขั้นตอนที่ 2 ให้เสร็จก่อน', 'error');
+        
+        State.mode = 'drawing';
+        State.tool = tool;
+        State.currentPath = [];
+        document.getElementById('drag-hint').classList.add('hidden');
+        
+        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(`tool-${tool}`).classList.add('active');
+        
+        const config = {
+            crack: {name: 'วัดรอยร้าว', icon: 'activity', color: 'bg-red-100 text-red-700 border-red-200'},
+            area: {name: 'พื้นที่เสื่อมสภาพ', icon: 'hexagon', color: 'bg-yellow-100 text-yellow-700 border-yellow-200'},
+            rebar: {name: 'วัดเหล็กเสริม', icon: 'git-commit', color: 'bg-green-100 text-green-700 border-green-200'}
+        };
+        
+        updateBadge(`<i data-lucide="${config[tool].icon}" class="w-3 h-3"></i> เครื่องมือ: ${config[tool].name}`, config[tool].color);
+        updateInstruction('คลิกค้างแล้วลากเพื่อวาดเส้น หรือคลิกทีละจุด จากนั้นกด "บันทึกเส้นนี้"');
+        lucide.createIcons();
+        document.getElementById('drawing-controls').classList.remove('hidden');
+        render();
+    };
+
+    // --- STREAMING_CHUNK:Implementing Drag-and-Drop and Hit Detection... ---
+    function getMousePos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        let x = e.clientX, y = e.clientY;
+        if(e.touches && e.touches.length > 0) { x = e.touches[0].clientX; y = e.touches[0].clientY; }
+        return { x: (x - rect.left) * scaleX, y: (y - rect.top) * scaleY };
+    }
+
+    function hitTestRefPoints(pos) {
+        // Hit radius dynamically scales slightly, but fixed 20px is good for most
+        // Convert screen distance back to canvas scale for accurate hit test
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const hitRadius = 25 * scaleX; // larger hit area for ease of use
+        
+        for(let i=0; i<State.refPoints.length; i++) {
+            if(dist(pos, State.refPoints[i]) < hitRadius) return i;
+        }
+        return -1;
+    }
+
+    // Mouse Events
+    canvas.addEventListener('mousedown', (e) => {
+        if(State.mode === 'idle') return;
+        const pos = getMousePos(e);
+        
+        if (State.mode === 'calibrating') {
+            let hitIdx = hitTestRefPoints(pos);
+            let reqPts = State.refMode === 'planar' ? 2 : 4;
+
+            if (hitIdx !== -1) {
+                // Start dragging
+                State.draggingPointIndex = hitIdx;
+            } else if (State.refPoints.length < reqPts) {
+                // Place new point
+                State.refPoints.push(pos);
+                updateBadge(`โหมด: กำหนดจุดอ้างอิง (${State.refPoints.length}/${reqPts})`, 'bg-indigo-100 text-indigo-700 border border-indigo-200');
+                if (State.refPoints.length === reqPts) processCalibration();
+            }
+            render();
+        } 
+        else if (State.mode === 'drawing') {
+            isDrawingLine = true;
+            State.currentPath.push(pos);
+            render();
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+        const pos = getMousePos(e);
+
+        if (State.mode === 'calibrating') {
+            // Hover effect logic
+            let hitIdx = hitTestRefPoints(pos);
+            if (hitIdx !== State.hoveredPointIndex) {
+                State.hoveredPointIndex = hitIdx;
+                render(); // trigger render for hover highlight
+            }
+            // Cursor update
+            if (State.draggingPointIndex !== -1) {
+                canvas.className = 'cursor-grabbing';
+            } else if (hitIdx !== -1) {
+                canvas.className = 'cursor-grab';
+            } else {
+                canvas.className = 'cursor-crosshair';
+            }
+
+            // Drag logic
+            if (State.draggingPointIndex !== -1) {
+                State.refPoints[State.draggingPointIndex] = pos;
+                let reqPts = State.refMode === 'planar' ? 2 : 4;
+                // Real-time recalculation if fully calibrated
+                if (State.refPoints.length === reqPts) {
+                    processCalibration(true); // silent update
+                }
+                render();
+            }
+        }
+        else if (State.mode === 'drawing') {
+            canvas.className = 'cursor-crosshair';
+            if (isDrawingLine) {
+                let last = State.currentPath[State.currentPath.length-1];
+                if(dist(last, pos) > 10) { // throttle points
+                    State.currentPath.push(pos);
+                    render();
+                }
+            }
+        }
+    });
+
+    window.addEventListener('mouseup', () => { 
+        if(State.draggingPointIndex !== -1) {
+            State.draggingPointIndex = -1;
+            render();
+        }
+        isDrawingLine = false; 
+    });
+
+    // Touch Support Mapping
+    canvas.addEventListener('touchstart', (e) => { e.preventDefault(); canvas.dispatchEvent(new MouseEvent('mousedown', {clientX: e.touches[0].clientX, clientY: e.touches[0].clientY})); }, {passive:false});
+    canvas.addEventListener('touchmove', (e) => { e.preventDefault(); canvas.dispatchEvent(new MouseEvent('mousemove', {clientX: e.touches[0].clientX, clientY: e.touches[0].clientY})); }, {passive:false});
+    canvas.addEventListener('touchend', (e) => { e.preventDefault(); canvas.dispatchEvent(new MouseEvent('mouseup')); }, {passive:false});
+
+    // --- STREAMING_CHUNK:Calibration processing and measurement recalculation... ---
+    function processCalibration(silent = false) {
+        if (State.refMode === 'planar') {
+            let pxLen = dist(State.refPoints[0], State.refPoints[1]);
+            let realLen = parseFloat(document.getElementById('ref-len').value) || 10;
+            State.pxPerCm = pxLen / realLen;
+            State.calibType = 'planar';
+        } else {
+            let w = parseFloat(document.getElementById('ref-w').value) || 10;
+            let h = parseFloat(document.getElementById('ref-h').value) || 20;
+            try {
+                State.H_Matrix = calculateHomography(State.refPoints, w, h);
+                State.calibType = 'perspective';
+            } catch(err) {
+                if(!silent) showToast('การคำนวณระนาบผิดพลาด กรุณาขยับจุดให้เป็นรูปสี่เหลี่ยม', 'error');
+                return;
+            }
+        }
+        
+        State.calibrated = true;
+        recalculateAllMeasurements(); // Crucial for drag & drop real-time updates!
+        updateCalStatus();
+        
+        if(!silent) {
+            updateBadge(`✅ อ้างอิงสำเร็จ`, 'bg-green-100 text-green-700 border border-green-200');
+            showToast('อ้างอิงขนาดเสร็จสิ้น สามารถไปที่ขั้นตอนที่ 3 ได้เลย', 'success');
+        }
+        render();
+    }
+
+    function recalculateAllMeasurements() {
+        State.records.crack.forEach(c => c.realLen = calculateRealLength(c.points));
+        State.records.area.forEach(a => a.realArea = calculateRealArea(a.points));
+        State.records.rebar.forEach(r => r.realLen = calculateRealLength(r.points));
+        updateDashboard();
+    }
+
+    function updateCalStatus() {
+        const el = document.getElementById('cal-status');
+        if (State.calibrated) {
+            let msg = State.calibType === 'planar' ? "ระนาบตรง 2 จุด" : "มุมเอียง (Homography) 4 จุด";
+            el.className = "mt-4 text-center text-xs font-bold text-emerald-700 bg-emerald-50 p-2 rounded-lg flex items-center justify-center gap-2 border border-emerald-200 shadow-sm";
+            el.innerHTML = `<i data-lucide="check-circle" class="w-4 h-4"></i> อ้างอิงสำเร็จ: ${msg}`;
+        } else {
+            el.className = "mt-4 text-center text-xs font-bold text-slate-500 bg-slate-50 p-2 rounded-lg flex items-center justify-center gap-2 border border-slate-200";
+            el.innerHTML = `<i data-lucide="alert-circle" class="w-4 h-4"></i> รอการกำหนดขนาด`;
+        }
+        lucide.createIcons({root: el});
+    }
+
+    window.cancelDrawing = function() {
+        State.currentPath = [];
+        render();
+    };
+
+    window.finishDrawing = function() {
+        if (State.currentPath.length < 2 && State.tool !== 'area') return showToast('เส้นสั้นเกินไป กรุณาวาดใหม่', 'error');
+        if (State.currentPath.length < 3 && State.tool === 'area') return showToast('พื้นที่ต้องมีอย่างน้อย 3 จุด', 'error');
+
+        const modal = document.getElementById('custom-modal');
+        const mTitle = document.getElementById('modal-title');
+        const mBody = document.getElementById('modal-body');
+        
+        if (State.tool === 'crack') {
+            mTitle.innerHTML = `<i data-lucide="activity" class="w-5 h-5 text-red-500"></i> ข้อมูลรอยร้าว`;
+            mBody.innerHTML = `
+                <div><label class="block text-sm font-bold text-slate-700 mb-1.5">ความกว้างรอยร้าว (mm)</label>
+                <input type="number" id="mod-crack-w" step="0.1" placeholder="เช่น 0.2" class="w-full border border-slate-300 px-4 py-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition"></div>
+                <div><label class="block text-sm font-bold text-slate-700 mb-1.5">ความลึก (mm) <span class="text-slate-400 font-normal">(ถ้ามี)</span></label>
+                <input type="number" id="mod-crack-d" step="0.1" placeholder="เช่น 5.0" class="w-full border border-slate-300 px-4 py-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition"></div>
+            `;
+        } else if (State.tool === 'area') {
+            mTitle.innerHTML = `<i data-lucide="hexagon" class="w-5 h-5 text-yellow-500"></i> ข้อมูลพื้นที่เสื่อมสภาพ`;
+            mBody.innerHTML = `
+                <div><label class="block text-sm font-bold text-slate-700 mb-1.5">รายละเอียด / สาเหตุ</label>
+                <input type="text" id="mod-area-desc" placeholder="เช่น คอนกรีตหลุดร่อนถึงเหล็กเสริม" class="w-full border border-slate-300 px-4 py-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition"></div>
+            `;
+        } else if (State.tool === 'rebar') {
+            mTitle.innerHTML = `<i data-lucide="git-commit" class="w-5 h-5 text-green-500"></i> ข้อมูลเหล็กเสริม`;
+            mBody.innerHTML = `
+                <div><label class="block text-sm font-bold text-slate-700 mb-1.5">รายละเอียดความเสียหาย</label>
+                <input type="text" id="mod-rebar-desc" placeholder="เช่น เป็นสนิมขุมหน้าตัดลดลง" class="w-full border border-slate-300 px-4 py-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition"></div>
+            `;
+        }
+        
+        lucide.createIcons({root: mTitle});
+        modal.classList.add('active');
+        setTimeout(() => { const inp = mBody.querySelector('input'); if(inp) inp.focus(); }, 100);
+    };
+
+    window.closeModal = function(save) {
+        document.getElementById('custom-modal').classList.remove('active');
+        if (!save) { State.currentPath = []; render(); return; }
+
+        let item = { id: Date.now(), points: [...State.currentPath] };
+        
+        if (State.tool === 'crack') {
+            item.width = parseFloat(document.getElementById('mod-crack-w').value) || 0;
+            item.depth = parseFloat(document.getElementById('mod-crack-d').value) || 0;
+            item.realLen = calculateRealLength(item.points);
+            State.records.crack.push(item);
+        } else if (State.tool === 'area') {
+            item.desc = document.getElementById('mod-area-desc').value || "-";
+            item.realArea = calculateRealArea(item.points);
+            State.records.area.push(item);
+        } else if (State.tool === 'rebar') {
+            item.desc = document.getElementById('mod-rebar-desc').value || "-";
+            item.realLen = calculateRealLength(item.points);
+            State.records.rebar.push(item);
+        }
+
+        State.currentPath = [];
+        showToast('บันทึกข้อมูลเรียบร้อย', 'success');
+        render();
+        updateDashboard();
+    };
+
+    // --- STREAMING_CHUNK:Canvas Draw Loop... ---
+    function render() {
+        if (!State.image) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(State.image, 0, 0);
+
+        // Helper: Draw Polylines
+        const drawPoly = (points, color, isArea=false, shadow=true) => {
+            if(points.length < 2) return;
+            ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+            for(let i=1; i<points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+            if(isArea) {
+                ctx.closePath();
+                ctx.fillStyle = color.replace('1.0', '0.3').replace('0.8', '0.2');
+                ctx.fill();
+            }
+            ctx.strokeStyle = color; ctx.lineWidth = 4;
+            ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+            if(shadow) { ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 2; }
+            ctx.stroke();
+            ctx.shadowColor = 'transparent';
+        };
+
+        // Render saved records
+        State.records.crack.forEach(c => drawPoly(c.points, 'rgba(239, 68, 68, 1.0)')); // Red
+        State.records.area.forEach(a => drawPoly(a.points, 'rgba(234, 179, 8, 1.0)', true)); // Yellow
+        State.records.rebar.forEach(r => drawPoly(r.points, 'rgba(34, 197, 94, 1.0)')); // Green
+
+        // Render active drawing path
+        if (State.currentPath.length > 0) {
+            let color = 'rgba(255, 255, 255, 0.9)';
+            if(State.tool==='crack') color='rgba(239, 68, 68, 0.8)';
+            if(State.tool==='area') color='rgba(234, 179, 8, 0.8)';
+            if(State.tool==='rebar') color='rgba(34, 197, 94, 0.8)';
+            drawPoly(State.currentPath, color, State.tool==='area', false);
+        }
+
+        // Render Calibration Points & Handles
+        if (State.refPoints.length > 0 && State.mode === 'calibrating') {
+            // Draw connecting lines first
+            if (State.refMode === 'perspective' && State.refPoints.length === 4) {
+                let s = sortRectCorners(State.refPoints);
+                ctx.beginPath(); ctx.moveTo(s[0].x, s[0].y);
+                for(let i=1;i<4;i++) ctx.lineTo(s[i].x, s[i].y);
+                ctx.closePath();
+                ctx.strokeStyle = 'rgba(99, 102, 241, 0.6)'; ctx.lineWidth=3; ctx.setLineDash([5, 5]); ctx.stroke();
+                ctx.setLineDash([]); // reset
+            } else if (State.refMode === 'planar' && State.refPoints.length === 2) {
+                ctx.beginPath(); ctx.moveTo(State.refPoints[0].x, State.refPoints[0].y); ctx.lineTo(State.refPoints[1].x, State.refPoints[1].y);
+                ctx.strokeStyle = 'rgba(99, 102, 241, 0.6)'; ctx.lineWidth=3; ctx.stroke();
+            }
+
+            // Draw Handles
+            State.refPoints.forEach((p, i) => {
+                let isHovered = (i === State.hoveredPointIndex);
+                let isDragging = (i === State.draggingPointIndex);
+                
+                // Outer glow/shadow
+                ctx.beginPath(); ctx.arc(p.x, p.y, isHovered || isDragging ? 14 : 8, 0, Math.PI*2);
+                ctx.fillStyle = isDragging ? 'rgba(79, 70, 229, 0.3)' : (isHovered ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0,0,0,0.2)');
+                ctx.fill();
+                
+                // Inner solid circle
+                ctx.beginPath(); ctx.arc(p.x, p.y, isHovered ? 8 : 6, 0, Math.PI*2);
+                ctx.fillStyle = '#4f46e5'; // Indigo 600
+                ctx.fill();
+                ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+                
+                // Label
+                ctx.fillStyle = 'white'; ctx.font="bold 12px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle";
+                ctx.fillText(i+1, p.x, p.y);
+            });
+        }
+    }
+
+    // --- STREAMING_CHUNK:Updating Dashboard and Excel Export... ---
+    function updateDashboard() {
+        const tCrack = document.getElementById('tb-raw-crack');
+        const tArea = document.getElementById('tb-raw-area');
+        const tRebar = document.getElementById('tb-raw-rebar');
+        
+        // Cracks
+        tCrack.innerHTML = '';
+        let sumCrackObj = {}; 
+        let totalCrack = 0;
+        
+        if (State.records.crack.length === 0) tCrack.innerHTML = '<tr><td colspan="5" class="px-4 py-6 text-center text-slate-400">ยังไม่มีข้อมูล</td></tr>';
+        State.records.crack.forEach((c, i) => {
+            totalCrack += c.realLen;
+            let wKey = c.width > 0 ? `${c.width} mm` : `N/A`;
+            sumCrackObj[wKey] = (sumCrackObj[wKey] || 0) + c.realLen;
+            
+            tCrack.innerHTML += `<tr class="hover:bg-slate-50">
+                <td class="px-4 py-3 font-bold text-slate-700">C${i+1}</td>
+                <td class="px-4 py-3">${c.width || '-'}</td>
+                <td class="px-4 py-3 text-slate-500">${c.depth || '-'}</td>
+                <td class="px-4 py-3 text-right font-bold text-red-600">${c.realLen.toFixed(2)}</td>
+                <td class="px-4 py-3 text-center"><button onclick="deleteRecord('crack', ${c.id})" class="p-1 text-rose-500 hover:bg-rose-100 rounded transition"><i data-lucide="trash-2" class="w-4 h-4"></i></button></td>
+            </tr>`;
+        });
+
+        // Area
+        tArea.innerHTML = '';
+        let totalArea = 0;
+        if (State.records.area.length === 0) tArea.innerHTML = '<tr><td colspan="4" class="px-4 py-6 text-center text-slate-400">ยังไม่มีข้อมูล</td></tr>';
+        State.records.area.forEach((a, i) => {
+            totalArea += a.realArea;
+            tArea.innerHTML += `<tr class="hover:bg-slate-50">
+                <td class="px-4 py-3 font-bold text-slate-700">A${i+1}</td>
+                <td class="px-4 py-3 truncate max-w-[150px] text-slate-600">${a.desc}</td>
+                <td class="px-4 py-3 text-right font-bold text-amber-600">${a.realArea.toFixed(2)}</td>
+                <td class="px-4 py-3 text-center"><button onclick="deleteRecord('area', ${a.id})" class="p-1 text-rose-500 hover:bg-rose-100 rounded transition"><i data-lucide="trash-2" class="w-4 h-4"></i></button></td>
+            </tr>`;
+        });
+
+        // Rebar
+        tRebar.innerHTML = '';
+        let totalRebar = 0;
+        if (State.records.rebar.length === 0) tRebar.innerHTML = '<tr><td colspan="4" class="px-4 py-6 text-center text-slate-400">ยังไม่มีข้อมูล</td></tr>';
+        State.records.rebar.forEach((r, i) => {
+            totalRebar += r.realLen;
+            tRebar.innerHTML += `<tr class="hover:bg-slate-50">
+                <td class="px-4 py-3 font-bold text-slate-700">R${i+1}</td>
+                <td class="px-4 py-3 truncate max-w-[150px] text-slate-600">${r.desc}</td>
+                <td class="px-4 py-3 text-right font-bold text-green-600">${r.realLen.toFixed(2)}</td>
+                <td class="px-4 py-3 text-center"><button onclick="deleteRecord('rebar', ${r.id})" class="p-1 text-rose-500 hover:bg-rose-100 rounded transition"><i data-lucide="trash-2" class="w-4 h-4"></i></button></td>
+            </tr>`;
+        });
+
+        // Re-init lucide icons for dynamic content
+        lucide.createIcons();
+
+        // Summaries Update
+        document.getElementById('total-crack-len').innerText = totalCrack.toFixed(2);
+        document.getElementById('total-area').innerText = totalArea.toFixed(2);
+        document.getElementById('total-rebar').innerText = totalRebar.toFixed(2);
+
+        // Render Summary table
+        let tbSumCrack = document.getElementById('tb-summary-crack');
+        tbSumCrack.innerHTML = '';
+        let keys = Object.keys(sumCrackObj).sort();
+        if(keys.length === 0) tbSumCrack.innerHTML = '<tr><td colspan="2" class="px-2 py-4 text-center text-slate-400 text-xs">ไม่มีข้อมูล</td></tr>';
+        keys.forEach(k => {
+            tbSumCrack.innerHTML += `<tr>
+                <td class="px-2 py-2.5 font-bold text-slate-700">${k}</td>
+                <td class="px-2 py-2.5 text-right font-bold text-blue-700">${sumCrackObj[k].toFixed(2)}</td>
+            </tr>`;
+        });
+    }
+
+    window.deleteRecord = function(type, id) {
+        State.records[type] = State.records[type].filter(x => x.id !== id);
+        render();
+        updateDashboard();
+        showToast('ลบข้อมูลสำเร็จ', 'info');
+    };
+
+    window.exportExcel = function() {
+        if(State.records.crack.length === 0 && State.records.area.length === 0 && State.records.rebar.length === 0) {
+            return showToast('ยังไม่มีข้อมูลสำหรับ Export', 'error');
+        }
+
+        const wb = XLSX.utils.book_new();
+        const bldg = document.getElementById('meta-bldg').value || "-";
+        const flr = document.getElementById('meta-floor').value || "-";
+        const loc = document.getElementById('meta-loc').value || "-";
+
+        // 1. Summary Sheet
+        let wsDataSum = [
+            ["รายงานหาปริมาณความเสียหายโครงสร้างจากภาพถ่าย (Structural Inspection)"],
+            ["อาคาร:", bldg, "ชั้น:", flr, "ตำแหน่ง:", loc],
+            [],
+            ["สรุปรวมทั้งหมด (Overall Summary)"],
+            ["รวมความยาวรอยร้าว (cm):", document.getElementById('total-crack-len').innerText],
+            ["รวมพื้นที่เสื่อมสภาพ (sq.cm):", document.getElementById('total-area').innerText],
+            ["รวมความยาวเหล็กเสริม (cm):", document.getElementById('total-rebar').innerText],
+            [],
+            ["สรุปความยาวรอยร้าว แยกตามความกว้าง (Crack Summary by Width)"],
+            ["ความกว้าง", "ความยาวรวม (cm)"]
+        ];
+        
+        let sumCrackObj = {};
+        State.records.crack.forEach(c => {
+            let wKey = c.width > 0 ? `${c.width} mm` : `N/A`;
+            sumCrackObj[wKey] = (sumCrackObj[wKey] || 0) + c.realLen;
+        });
+        Object.keys(sumCrackObj).sort().forEach(k => wsDataSum.push([k, sumCrackObj[k].toFixed(2)]));
+        
+        const wsSummary = XLSX.utils.aoa_to_sheet(wsDataSum);
+        wsSummary['!cols'] = [{wch: 35}, {wch: 25}, {wch: 15}, {wch: 25}];
+        XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
+
+        // 2. Raw Data Sheets
+        if(State.records.crack.length > 0) {
+            let crackData = [["ID", "Width (mm)", "Depth (mm)", "Length (cm)"]];
+            State.records.crack.forEach((c,i) => crackData.push([`C${i+1}`, c.width||"-", c.depth||"-", c.realLen.toFixed(2)]));
+            const wsCrack = XLSX.utils.aoa_to_sheet(crackData);
+            wsCrack['!cols'] = [{wch: 10}, {wch: 15}, {wch: 15}, {wch: 15}];
+            XLSX.utils.book_append_sheet(wb, wsCrack, "Cracks");
+        }
+        
+        if(State.records.area.length > 0) {
+            let areaData = [["ID", "Description", "Area (sq.cm)"]];
+            State.records.area.forEach((a,i) => areaData.push([`A${i+1}`, a.desc, a.realArea.toFixed(2)]));
+            const wsArea = XLSX.utils.aoa_to_sheet(areaData);
+            wsArea['!cols'] = [{wch: 10}, {wch: 40}, {wch: 15}];
+            XLSX.utils.book_append_sheet(wb, wsArea, "Damaged_Areas");
+        }
+
+        if(State.records.rebar.length > 0) {
+            let rebarData = [["ID", "Description", "Length (cm)"]];
+            State.records.rebar.forEach((r,i) => rebarData.push([`R${i+1}`, r.desc, r.realLen.toFixed(2)]));
+            const wsRebar = XLSX.utils.aoa_to_sheet(rebarData);
+            wsRebar['!cols'] = [{wch: 10}, {wch: 40}, {wch: 15}];
+            XLSX.utils.book_append_sheet(wb, wsRebar, "Rebar");
+        }
+
+        XLSX.writeFile(wb, `Inspection_Report_${bldg}_${loc}.xlsx`);
+        showToast('ส่งออกไฟล์ Excel สำเร็จ', 'success');
+    };
+
+</script>
+</body>
+</html>
