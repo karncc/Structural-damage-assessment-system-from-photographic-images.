@@ -506,7 +506,7 @@
         return Math.abs(area / 2.0);
     }
 
-    // --- STREAMING_CHUNK:Setting up canvas and UI event listeners... ---
+    // --- DOM Elements & Setup ---
     const canvas = document.getElementById('main-canvas');
     const ctx = canvas.getContext('2d');
     let isDrawingLine = false;
@@ -574,10 +574,9 @@
         document.getElementById('drawing-controls').classList.add('hidden');
         document.getElementById('drag-hint').classList.remove('hidden');
         
-        // Don't clear points if we already have the correct amount, let user edit them!
         let reqPts = State.refMode === 'planar' ? 2 : 4;
         if(State.refPoints.length !== reqPts) {
-            State.refPoints = []; // Only clear if mismatched
+            State.refPoints = [];
             State.calibrated = false;
             updateCalStatus();
         }
@@ -611,7 +610,7 @@
         render();
     };
 
-    // --- STREAMING_CHUNK:Implementing Drag-and-Drop and Hit Detection... ---
+    // --- Interaction & Hit Detection ---
     function getMousePos(e) {
         const rect = canvas.getBoundingClientRect();
         const scaleX = canvas.width / rect.width;
@@ -622,11 +621,9 @@
     }
 
     function hitTestRefPoints(pos) {
-        // Hit radius dynamically scales slightly, but fixed 20px is good for most
-        // Convert screen distance back to canvas scale for accurate hit test
         const rect = canvas.getBoundingClientRect();
         const scaleX = canvas.width / rect.width;
-        const hitRadius = 25 * scaleX; // larger hit area for ease of use
+        const hitRadius = 25 * scaleX;
         
         for(let i=0; i<State.refPoints.length; i++) {
             if(dist(pos, State.refPoints[i]) < hitRadius) return i;
@@ -634,7 +631,6 @@
         return -1;
     }
 
-    // Mouse Events
     canvas.addEventListener('mousedown', (e) => {
         if(State.mode === 'idle') return;
         const pos = getMousePos(e);
@@ -644,10 +640,8 @@
             let reqPts = State.refMode === 'planar' ? 2 : 4;
 
             if (hitIdx !== -1) {
-                // Start dragging
                 State.draggingPointIndex = hitIdx;
             } else if (State.refPoints.length < reqPts) {
-                // Place new point
                 State.refPoints.push(pos);
                 updateBadge(`โหมด: กำหนดจุดอ้างอิง (${State.refPoints.length}/${reqPts})`, 'bg-indigo-100 text-indigo-700 border border-indigo-200');
                 if (State.refPoints.length === reqPts) processCalibration();
@@ -665,13 +659,12 @@
         const pos = getMousePos(e);
 
         if (State.mode === 'calibrating') {
-            // Hover effect logic
             let hitIdx = hitTestRefPoints(pos);
             if (hitIdx !== State.hoveredPointIndex) {
                 State.hoveredPointIndex = hitIdx;
-                render(); // trigger render for hover highlight
+                render(); 
             }
-            // Cursor update
+            
             if (State.draggingPointIndex !== -1) {
                 canvas.className = 'cursor-grabbing';
             } else if (hitIdx !== -1) {
@@ -680,13 +673,11 @@
                 canvas.className = 'cursor-crosshair';
             }
 
-            // Drag logic
             if (State.draggingPointIndex !== -1) {
                 State.refPoints[State.draggingPointIndex] = pos;
                 let reqPts = State.refMode === 'planar' ? 2 : 4;
-                // Real-time recalculation if fully calibrated
                 if (State.refPoints.length === reqPts) {
-                    processCalibration(true); // silent update
+                    processCalibration(true);
                 }
                 render();
             }
@@ -695,7 +686,7 @@
             canvas.className = 'cursor-crosshair';
             if (isDrawingLine) {
                 let last = State.currentPath[State.currentPath.length-1];
-                if(dist(last, pos) > 10) { // throttle points
+                if(dist(last, pos) > 10) { 
                     State.currentPath.push(pos);
                     render();
                 }
@@ -711,12 +702,11 @@
         isDrawingLine = false; 
     });
 
-    // Touch Support Mapping
     canvas.addEventListener('touchstart', (e) => { e.preventDefault(); canvas.dispatchEvent(new MouseEvent('mousedown', {clientX: e.touches[0].clientX, clientY: e.touches[0].clientY})); }, {passive:false});
     canvas.addEventListener('touchmove', (e) => { e.preventDefault(); canvas.dispatchEvent(new MouseEvent('mousemove', {clientX: e.touches[0].clientX, clientY: e.touches[0].clientY})); }, {passive:false});
     canvas.addEventListener('touchend', (e) => { e.preventDefault(); canvas.dispatchEvent(new MouseEvent('mouseup')); }, {passive:false});
 
-    // --- STREAMING_CHUNK:Calibration processing and measurement recalculation... ---
+    // --- Processing & Callbacks ---
     function processCalibration(silent = false) {
         if (State.refMode === 'planar') {
             let pxLen = dist(State.refPoints[0], State.refPoints[1]);
@@ -736,7 +726,7 @@
         }
         
         State.calibrated = true;
-        recalculateAllMeasurements(); // Crucial for drag & drop real-time updates!
+        recalculateAllMeasurements(); 
         updateCalStatus();
         
         if(!silent) {
@@ -833,18 +823,24 @@
         updateDashboard();
     };
 
-    // --- STREAMING_CHUNK:Canvas Draw Loop... ---
-    function drawTextLabel(text, x, y, color) {
+    // --- Rendering Engine ---
+    function drawTextLabel(text, x, y, bgCol, textCol) {
         ctx.font = 'bold 16px Sarabun, sans-serif';
         const padding = 6;
         const w = ctx.measureText(text).width;
         const h = 16;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        
+        // Background
+        ctx.fillStyle = bgCol;
         ctx.fillRect(x - w/2 - padding, y - h/2 - padding, w + padding*2, h + padding*2);
-        ctx.strokeStyle = color;
+        
+        // Border
+        ctx.strokeStyle = textCol;
         ctx.lineWidth = 1;
         ctx.strokeRect(x - w/2 - padding, y - h/2 - padding, w + padding*2, h + padding*2);
-        ctx.fillStyle = color;
+        
+        // Text
+        ctx.fillStyle = textCol;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(text, x, y);
@@ -855,7 +851,6 @@
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(State.image, 0, 0);
 
-        // Helper: Draw Polylines
         const drawPoly = (points, color, isArea=false, shadow=true) => {
             if(points.length < 2) return;
             ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
@@ -872,10 +867,26 @@
             ctx.shadowColor = 'transparent';
         };
 
-        // Render saved records
-        State.records.crack.forEach(c => drawPoly(c.points, 'rgba(239, 68, 68, 1.0)')); // Red
-        State.records.area.forEach(a => drawPoly(a.points, 'rgba(234, 179, 8, 1.0)', true)); // Yellow
-        State.records.rebar.forEach(r => drawPoly(r.points, 'rgba(34, 197, 94, 1.0)')); // Green
+        // Render saved records & their ID labels
+        State.records.crack.forEach((c, idx) => {
+            drawPoly(c.points, 'rgba(239, 68, 68, 1.0)'); // Red
+            let mid = c.points[Math.floor(c.points.length / 2)];
+            if(mid) drawTextLabel(`C${idx+1}`, mid.x, mid.y - 20, 'rgba(255, 255, 255, 0.9)', '#dc2626');
+        });
+        
+        State.records.area.forEach((a, idx) => {
+            drawPoly(a.points, 'rgba(234, 179, 8, 1.0)', true); // Yellow
+            // Find rough center of polygon for label
+            let cx = a.points.reduce((s, p) => s + p.x, 0) / a.points.length;
+            let cy = a.points.reduce((s, p) => s + p.y, 0) / a.points.length;
+            drawTextLabel(`A${idx+1}`, cx, cy, 'rgba(255, 255, 255, 0.9)', '#ca8a04');
+        });
+        
+        State.records.rebar.forEach((r, idx) => {
+            drawPoly(r.points, 'rgba(34, 197, 94, 1.0)'); // Green
+            let mid = r.points[Math.floor(r.points.length / 2)];
+            if(mid) drawTextLabel(`R${idx+1}`, mid.x, mid.y - 20, 'rgba(255, 255, 255, 0.9)', '#16a34a');
+        });
 
         // Render active drawing path
         if (State.currentPath.length > 0) {
@@ -886,39 +897,45 @@
             drawPoly(State.currentPath, color, State.tool==='area', false);
         }
 
-        // Render Calibration Points & Handles
+        // Render Calibration Points & PERMANENT Reference Labels
         if (State.refPoints.length > 0) {
-            // Draw lines and labels (Always visible if exists)
+            
+            // Draw lines and permanent labels
             if (State.refMode === 'perspective' && State.refPoints.length === 4) {
                 let s = sortRectCorners(State.refPoints);
                 ctx.beginPath(); ctx.moveTo(s[0].x, s[0].y);
                 for(let i=1;i<4;i++) ctx.lineTo(s[i].x, s[i].y);
                 ctx.closePath();
                 ctx.strokeStyle = 'rgba(99, 102, 241, 0.8)'; ctx.lineWidth=3; 
+                
+                // Only show dashed lines during calibration mode
                 if(State.mode === 'calibrating') ctx.setLineDash([5, 5]); 
                 ctx.stroke();
                 ctx.setLineDash([]); // reset
 
+                // THIS is the permanent label that stays on the image
                 if (State.calibrated && State.calibType === 'perspective') {
                     let w = document.getElementById('ref-w').value;
                     let h = document.getElementById('ref-h').value;
                     let cx = (s[0].x + s[1].x + s[2].x + s[3].x) / 4;
                     let cy = (s[0].y + s[1].y + s[2].y + s[3].y) / 4;
-                    drawTextLabel(`Ref: ${w}x${h} cm`, cx, cy, '#4f46e5');
+                    // Draw large, permanent text label for reference
+                    drawTextLabel(`Ref: ${w}x${h} cm`, cx, cy, 'rgba(255, 255, 255, 0.95)', '#4f46e5');
                 }
             } else if (State.refMode === 'planar' && State.refPoints.length === 2) {
                 ctx.beginPath(); ctx.moveTo(State.refPoints[0].x, State.refPoints[0].y); ctx.lineTo(State.refPoints[1].x, State.refPoints[1].y);
                 ctx.strokeStyle = 'rgba(99, 102, 241, 0.8)'; ctx.lineWidth=3; ctx.stroke();
 
+                // Permanent label
                 if (State.calibrated && State.calibType === 'planar') {
                     let len = document.getElementById('ref-len').value;
                     let cx = (State.refPoints[0].x + State.refPoints[1].x) / 2;
                     let cy = (State.refPoints[0].y + State.refPoints[1].y) / 2;
-                    drawTextLabel(`Ref: ${len} cm`, cx, cy, '#4f46e5');
+                    drawTextLabel(`Ref: ${len} cm`, cx, cy - 20, 'rgba(255, 255, 255, 0.95)', '#4f46e5');
                 }
             }
 
-            // Draw interactive handles ONLY during calibration
+            // Draw interactive handles ONLY during calibration (so they disappear on export/idle)
             if (State.mode === 'calibrating') {
                 State.refPoints.forEach((p, i) => {
                     let isHovered = (i === State.hoveredPointIndex);
@@ -940,7 +957,7 @@
         }
     }
 
-    // --- STREAMING_CHUNK:Updating Dashboard and Excel Export... ---
+    // --- Dashboard & Export ---
     function updateDashboard() {
         const tCrack = document.getElementById('tb-raw-crack');
         const tArea = document.getElementById('tb-raw-area');
@@ -1174,17 +1191,22 @@
         let imgTitleRow = ws.rowCount + 1;
         ws.addRow(['ภาพถ่ายประกอบการตรวจสอบ']).font = { bold: true, size: 12 };
         
-        // Temporarily clear handles for clean screenshot
+        // --- CAPTURE IMAGE FOR EXCEL ---
         const prevMode = State.mode;
-        State.mode = 'idle';
-        render();
+        // Setting mode to 'idle' ensures interactive circles are hidden, 
+        // BUT the reference box/line and all text labels (C1, Ref: 10x10) remain!
+        State.mode = 'idle'; 
+        render(); 
+        
         const imgData = canvas.toDataURL('image/jpeg', 0.85);
+        
+        // Restore mode
         State.mode = prevMode;
-        render(); // Restore
+        render(); 
 
         const imageId = workbook.addImage({ base64: imgData, extension: 'jpeg' });
         
-        // Scale image to fit reasonably (max width 600px equivalent)
+        // Scale image to fit reasonably in excel sheet
         const maxWidth = 700;
         const scale = maxWidth / canvas.width;
         const scaledWidth = canvas.width * scale;
