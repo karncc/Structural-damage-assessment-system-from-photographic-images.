@@ -237,10 +237,17 @@
                 </div>
                 <canvas id="main-canvas" class="hidden cursor-crosshair"></canvas>
             </div>
-            <p class="text-xs text-slate-500 mt-3 font-medium bg-white px-3 py-2 rounded-lg border border-slate-100 shadow-sm inline-flex items-center gap-2">
-                <i data-lucide="info" class="w-4 h-4 text-blue-500"></i>
-                <span id="instruction-text">อัพโหลดรูปภาพ -> ตั้งค่าอ้างอิง -> เลือกเครื่องมือเพื่อเริ่มวัดรอยร้าว</span>
-            </p>
+            
+            <div class="flex flex-col lg:flex-row gap-2 mt-3 items-start">
+                <p class="text-xs text-slate-500 font-medium bg-white px-3 py-2 rounded-lg border border-slate-100 shadow-sm inline-flex items-center gap-2 shrink-0">
+                    <i data-lucide="info" class="w-4 h-4 text-blue-500 shrink-0"></i>
+                    <span id="instruction-text">อัพโหลดรูปภาพ -> ตั้งค่าอ้างอิง -> เลือกเครื่องมือเพื่อเริ่มวัดรอยร้าว</span>
+                </p>
+                <p class="text-xs text-amber-700 font-medium bg-amber-50 px-3 py-2 rounded-lg border border-amber-200 shadow-sm inline-flex items-start sm:items-center gap-2">
+                    <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-500 shrink-0"></i>
+                    <span><b>หมายเหตุ:</b> รอยร้าวและจุดอ้างอิง (Ref) ต้องอยู่ในระนาบเดียวกันเท่านั้น หากวัดรอยร้าวในระนาบอื่นค่าที่ได้จะผิดเพี้ยน</span>
+                </p>
+            </div>
         </div>
     </div>
 
