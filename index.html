@@ -7,8 +7,9 @@
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- SheetJS for Excel -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- ExcelJS and FileSaver for Image-embedded Excel Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Google Fonts -->
@@ -114,14 +115,28 @@
         <!-- Left Sidebar: Tools & Calibration -->
         <div class="xl:col-span-3 flex flex-col gap-5">
             
-            <!-- Setup & Image Upload -->
+            <!-- Setup & Image Upload & Project Save/Load -->
             <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
-                <h2 class="font-bold text-slate-800 mb-3 text-sm flex items-center gap-2">
-                    <span class="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs">1</span> 
-                    อัพโหลดรูปภาพ
-                </h2>
-                <div class="relative">
-                    <input type="file" id="imageUpload" accept="image/*" class="w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 border border-slate-200 rounded-lg cursor-pointer transition"/>
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs">1</span> 
+                        ข้อมูลภาพ (Image / Project)
+                    </h2>
+                </div>
+                <div class="space-y-3">
+                    <div class="relative">
+                        <label class="block text-xs font-bold text-slate-600 mb-1">เริ่มรูปภาพใหม่ (New Image)</label>
+                        <input type="file" id="imageUpload" accept="image/*" class="w-full text-sm text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 border border-slate-200 rounded-lg cursor-pointer transition"/>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
+                        <button onclick="saveProject()" class="flex items-center justify-center gap-2 py-2 bg-slate-800 text-white text-xs font-bold rounded-lg hover:bg-slate-900 transition shadow-sm">
+                            <i data-lucide="save" class="w-3.5 h-3.5"></i> Save
+                        </button>
+                        <button onclick="document.getElementById('projectUpload').click()" class="flex items-center justify-center gap-2 py-2 bg-white border border-slate-300 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-50 transition shadow-sm">
+                            <i data-lucide="folder-open" class="w-3.5 h-3.5"></i> Load
+                        </button>
+                        <input type="file" id="projectUpload" accept=".json" class="hidden" onchange="loadProject(event)" />
+                    </div>
                 </div>
             </div>
 
@@ -819,6 +834,22 @@
     };
 
     // --- STREAMING_CHUNK:Canvas Draw Loop... ---
+    function drawTextLabel(text, x, y, color) {
+        ctx.font = 'bold 16px Sarabun, sans-serif';
+        const padding = 6;
+        const w = ctx.measureText(text).width;
+        const h = 16;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.fillRect(x - w/2 - padding, y - h/2 - padding, w + padding*2, h + padding*2);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - w/2 - padding, y - h/2 - padding, w + padding*2, h + padding*2);
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, x, y);
+    }
+
     function render() {
         if (!State.image) return;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -856,40 +887,56 @@
         }
 
         // Render Calibration Points & Handles
-        if (State.refPoints.length > 0 && State.mode === 'calibrating') {
-            // Draw connecting lines first
+        if (State.refPoints.length > 0) {
+            // Draw lines and labels (Always visible if exists)
             if (State.refMode === 'perspective' && State.refPoints.length === 4) {
                 let s = sortRectCorners(State.refPoints);
                 ctx.beginPath(); ctx.moveTo(s[0].x, s[0].y);
                 for(let i=1;i<4;i++) ctx.lineTo(s[i].x, s[i].y);
                 ctx.closePath();
-                ctx.strokeStyle = 'rgba(99, 102, 241, 0.6)'; ctx.lineWidth=3; ctx.setLineDash([5, 5]); ctx.stroke();
+                ctx.strokeStyle = 'rgba(99, 102, 241, 0.8)'; ctx.lineWidth=3; 
+                if(State.mode === 'calibrating') ctx.setLineDash([5, 5]); 
+                ctx.stroke();
                 ctx.setLineDash([]); // reset
+
+                if (State.calibrated && State.calibType === 'perspective') {
+                    let w = document.getElementById('ref-w').value;
+                    let h = document.getElementById('ref-h').value;
+                    let cx = (s[0].x + s[1].x + s[2].x + s[3].x) / 4;
+                    let cy = (s[0].y + s[1].y + s[2].y + s[3].y) / 4;
+                    drawTextLabel(`Ref: ${w}x${h} cm`, cx, cy, '#4f46e5');
+                }
             } else if (State.refMode === 'planar' && State.refPoints.length === 2) {
                 ctx.beginPath(); ctx.moveTo(State.refPoints[0].x, State.refPoints[0].y); ctx.lineTo(State.refPoints[1].x, State.refPoints[1].y);
-                ctx.strokeStyle = 'rgba(99, 102, 241, 0.6)'; ctx.lineWidth=3; ctx.stroke();
+                ctx.strokeStyle = 'rgba(99, 102, 241, 0.8)'; ctx.lineWidth=3; ctx.stroke();
+
+                if (State.calibrated && State.calibType === 'planar') {
+                    let len = document.getElementById('ref-len').value;
+                    let cx = (State.refPoints[0].x + State.refPoints[1].x) / 2;
+                    let cy = (State.refPoints[0].y + State.refPoints[1].y) / 2;
+                    drawTextLabel(`Ref: ${len} cm`, cx, cy, '#4f46e5');
+                }
             }
 
-            // Draw Handles
-            State.refPoints.forEach((p, i) => {
-                let isHovered = (i === State.hoveredPointIndex);
-                let isDragging = (i === State.draggingPointIndex);
-                
-                // Outer glow/shadow
-                ctx.beginPath(); ctx.arc(p.x, p.y, isHovered || isDragging ? 14 : 8, 0, Math.PI*2);
-                ctx.fillStyle = isDragging ? 'rgba(79, 70, 229, 0.3)' : (isHovered ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0,0,0,0.2)');
-                ctx.fill();
-                
-                // Inner solid circle
-                ctx.beginPath(); ctx.arc(p.x, p.y, isHovered ? 8 : 6, 0, Math.PI*2);
-                ctx.fillStyle = '#4f46e5'; // Indigo 600
-                ctx.fill();
-                ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
-                
-                // Label
-                ctx.fillStyle = 'white'; ctx.font="bold 12px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle";
-                ctx.fillText(i+1, p.x, p.y);
-            });
+            // Draw interactive handles ONLY during calibration
+            if (State.mode === 'calibrating') {
+                State.refPoints.forEach((p, i) => {
+                    let isHovered = (i === State.hoveredPointIndex);
+                    let isDragging = (i === State.draggingPointIndex);
+                    
+                    ctx.beginPath(); ctx.arc(p.x, p.y, isHovered || isDragging ? 14 : 8, 0, Math.PI*2);
+                    ctx.fillStyle = isDragging ? 'rgba(79, 70, 229, 0.3)' : (isHovered ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0,0,0,0.2)');
+                    ctx.fill();
+                    
+                    ctx.beginPath(); ctx.arc(p.x, p.y, isHovered ? 8 : 6, 0, Math.PI*2);
+                    ctx.fillStyle = '#4f46e5'; 
+                    ctx.fill();
+                    ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+                    
+                    ctx.fillStyle = 'white'; ctx.font="bold 12px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle";
+                    ctx.fillText(i+1, p.x, p.y);
+                });
+            }
         }
     }
 
@@ -975,67 +1022,224 @@
         showToast('ลบข้อมูลสำเร็จ', 'info');
     };
 
-    window.exportExcel = function() {
+    window.saveProject = function() {
+        if (!State.image) return showToast('ไม่มีรูปภาพหรือโปรเจคให้บันทึก', 'error');
+        
+        // Convert original image to base64
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = State.image.width;
+        tempCanvas.height = State.image.height;
+        const tCtx = tempCanvas.getContext('2d');
+        tCtx.drawImage(State.image, 0, 0);
+        const imageBase64 = tempCanvas.toDataURL('image/jpeg', 0.85);
+        
+        const projectData = {
+            metadata: {
+                bldg: document.getElementById('meta-bldg').value,
+                floor: document.getElementById('meta-floor').value,
+                loc: document.getElementById('meta-loc').value
+            },
+            config: {
+                refMode: State.refMode,
+                planarLen: document.getElementById('ref-len').value,
+                perspW: document.getElementById('ref-w').value,
+                perspH: document.getElementById('ref-h').value
+            },
+            state: {
+                calibrated: State.calibrated,
+                calibType: State.calibType,
+                pxPerCm: State.pxPerCm,
+                H_Matrix: State.H_Matrix,
+                refPoints: State.refPoints,
+                records: State.records
+            },
+            imageData: imageBase64
+        };
+        
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(projectData));
+        const dlAnchorElem = document.createElement('a');
+        dlAnchorElem.setAttribute("href", dataStr);
+        dlAnchorElem.setAttribute("download", `Inspection_${Date.now()}.json`);
+        dlAnchorElem.click();
+        showToast('บันทึกโปรเจคสำเร็จ', 'success');
+    };
+
+    window.loadProject = function(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = JSON.parse(e.target.result);
+                
+                // Load Metadata
+                document.getElementById('meta-bldg').value = data.metadata.bldg || "";
+                document.getElementById('meta-floor').value = data.metadata.floor || "";
+                document.getElementById('meta-loc').value = data.metadata.loc || "";
+                
+                // Load Config
+                setRefMode(data.config.refMode);
+                document.getElementById('ref-len').value = data.config.planarLen;
+                document.getElementById('ref-w').value = data.config.perspW;
+                document.getElementById('ref-h').value = data.config.perspH;
+                
+                // Load State
+                State.calibrated = data.state.calibrated;
+                State.calibType = data.state.calibType;
+                State.pxPerCm = data.state.pxPerCm;
+                State.H_Matrix = data.state.H_Matrix;
+                State.refPoints = data.state.refPoints;
+                State.records = data.state.records;
+                
+                // Load Image
+                const img = new Image();
+                img.onload = () => {
+                    State.image = img;
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    document.getElementById('canvas-placeholder').classList.add('hidden');
+                    canvas.classList.remove('hidden');
+                    
+                    State.mode = 'idle';
+                    State.tool = null;
+                    document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+                    
+                    updateCalStatus();
+                    render();
+                    updateDashboard();
+                    showToast('โหลดโปรเจคสำเร็จ', 'success');
+                };
+                img.src = data.imageData;
+                
+            } catch(err) {
+                showToast('ไฟล์โปรเจคไม่ถูกต้อง', 'error');
+            }
+            event.target.value = ''; // reset input
+        };
+        reader.readAsText(file);
+    };
+
+    window.exportExcel = async function() {
         if(State.records.crack.length === 0 && State.records.area.length === 0 && State.records.rebar.length === 0) {
             return showToast('ยังไม่มีข้อมูลสำหรับ Export', 'error');
         }
 
-        const wb = XLSX.utils.book_new();
+        showToast('กำลังสร้างไฟล์ Excel...', 'info');
+
         const bldg = document.getElementById('meta-bldg').value || "-";
         const flr = document.getElementById('meta-floor').value || "-";
         const loc = document.getElementById('meta-loc').value || "-";
 
-        // 1. Summary Sheet
-        let wsDataSum = [
-            ["รายงานหาปริมาณความเสียหายโครงสร้างจากภาพถ่าย (Structural Inspection)"],
-            ["อาคาร:", bldg, "ชั้น:", flr, "ตำแหน่ง:", loc],
-            [],
-            ["สรุปรวมทั้งหมด (Overall Summary)"],
-            ["รวมความยาวรอยร้าว (cm):", document.getElementById('total-crack-len').innerText],
-            ["รวมพื้นที่เสื่อมสภาพ (sq.cm):", document.getElementById('total-area').innerText],
-            ["รวมความยาวเหล็กเสริม (cm):", document.getElementById('total-rebar').innerText],
-            [],
-            ["สรุปความยาวรอยร้าว แยกตามความกว้าง (Crack Summary by Width)"],
-            ["ความกว้าง", "ความยาวรวม (cm)"]
-        ];
+        const workbook = new ExcelJS.Workbook();
+        workbook.creator = 'Structural Inspection System';
         
+        // --- Sheet 1: Summary & Image ---
+        const ws = workbook.addWorksheet('Summary');
+        
+        ws.columns = [
+            { header: '', key: 'col1', width: 25 },
+            { header: '', key: 'col2', width: 20 },
+            { header: '', key: 'col3', width: 15 },
+            { header: '', key: 'col4', width: 25 }
+        ];
+
+        ws.addRow(['รายงานหาปริมาณความเสียหายโครงสร้างจากภาพถ่าย (Structural Inspection)']);
+        ws.mergeCells('A1:D1');
+        ws.getCell('A1').font = { size: 14, bold: true };
+        
+        ws.addRow(['อาคาร:', bldg, 'ชั้น:', flr]);
+        ws.addRow(['ตำแหน่ง:', loc, '', '']);
+        ws.addRow([]);
+        
+        ws.addRow(['สรุปรวมทั้งหมด (Overall Summary)']).font = { bold: true };
+        ws.addRow(['รวมความยาวรอยร้าว (cm):', document.getElementById('total-crack-len').innerText]);
+        ws.addRow(['รวมพื้นที่เสื่อมสภาพ (sq.cm):', document.getElementById('total-area').innerText]);
+        ws.addRow(['รวมความยาวเหล็กเสริม (cm):', document.getElementById('total-rebar').innerText]);
+        ws.addRow([]);
+
+        ws.addRow(['สรุปความยาวรอยร้าว แยกตามความกว้าง']).font = { bold: true };
+        ws.addRow(['ความกว้าง', 'ความยาวรวม (cm)']);
+        ws.getRow(ws.rowCount).font = { bold: true };
+
         let sumCrackObj = {};
         State.records.crack.forEach(c => {
             let wKey = c.width > 0 ? `${c.width} mm` : `N/A`;
             sumCrackObj[wKey] = (sumCrackObj[wKey] || 0) + c.realLen;
         });
-        Object.keys(sumCrackObj).sort().forEach(k => wsDataSum.push([k, sumCrackObj[k].toFixed(2)]));
-        
-        const wsSummary = XLSX.utils.aoa_to_sheet(wsDataSum);
-        wsSummary['!cols'] = [{wch: 35}, {wch: 25}, {wch: 15}, {wch: 25}];
-        XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
+        Object.keys(sumCrackObj).sort().forEach(k => {
+            ws.addRow([k, sumCrackObj[k].toFixed(2)]);
+        });
 
-        // 2. Raw Data Sheets
+        ws.addRow([]);
+        let imgTitleRow = ws.rowCount + 1;
+        ws.addRow(['ภาพถ่ายประกอบการตรวจสอบ']).font = { bold: true, size: 12 };
+        
+        // Temporarily clear handles for clean screenshot
+        const prevMode = State.mode;
+        State.mode = 'idle';
+        render();
+        const imgData = canvas.toDataURL('image/jpeg', 0.85);
+        State.mode = prevMode;
+        render(); // Restore
+
+        const imageId = workbook.addImage({ base64: imgData, extension: 'jpeg' });
+        
+        // Scale image to fit reasonably (max width 600px equivalent)
+        const maxWidth = 700;
+        const scale = maxWidth / canvas.width;
+        const scaledWidth = canvas.width * scale;
+        const scaledHeight = canvas.height * scale;
+
+        ws.addImage(imageId, {
+            tl: { col: 0, row: imgTitleRow },
+            ext: { width: scaledWidth, height: scaledHeight }
+        });
+
+        // --- Sheet 2: Cracks ---
         if(State.records.crack.length > 0) {
-            let crackData = [["ID", "Width (mm)", "Depth (mm)", "Length (cm)"]];
-            State.records.crack.forEach((c,i) => crackData.push([`C${i+1}`, c.width||"-", c.depth||"-", c.realLen.toFixed(2)]));
-            const wsCrack = XLSX.utils.aoa_to_sheet(crackData);
-            wsCrack['!cols'] = [{wch: 10}, {wch: 15}, {wch: 15}, {wch: 15}];
-            XLSX.utils.book_append_sheet(wb, wsCrack, "Cracks");
+            const wsCrack = workbook.addWorksheet('Cracks');
+            wsCrack.columns = [
+                { header: 'ID', key: 'id', width: 10 },
+                { header: 'Width (mm)', key: 'w', width: 15 },
+                { header: 'Depth (mm)', key: 'd', width: 15 },
+                { header: 'Length (cm)', key: 'l', width: 15 }
+            ];
+            wsCrack.getRow(1).font = { bold: true };
+            State.records.crack.forEach((c,i) => {
+                wsCrack.addRow({id: `C${i+1}`, w: c.width||"-", d: c.depth||"-", l: c.realLen.toFixed(2)});
+            });
         }
         
+        // --- Sheet 3: Area ---
         if(State.records.area.length > 0) {
-            let areaData = [["ID", "Description", "Area (sq.cm)"]];
-            State.records.area.forEach((a,i) => areaData.push([`A${i+1}`, a.desc, a.realArea.toFixed(2)]));
-            const wsArea = XLSX.utils.aoa_to_sheet(areaData);
-            wsArea['!cols'] = [{wch: 10}, {wch: 40}, {wch: 15}];
-            XLSX.utils.book_append_sheet(wb, wsArea, "Damaged_Areas");
+            const wsArea = workbook.addWorksheet('Damaged_Areas');
+            wsArea.columns = [
+                { header: 'ID', key: 'id', width: 10 },
+                { header: 'Description', key: 'desc', width: 40 },
+                { header: 'Area (sq.cm)', key: 'area', width: 15 }
+            ];
+            wsArea.getRow(1).font = { bold: true };
+            State.records.area.forEach((a,i) => {
+                wsArea.addRow({id: `A${i+1}`, desc: a.desc, area: a.realArea.toFixed(2)});
+            });
         }
 
+        // --- Sheet 4: Rebar ---
         if(State.records.rebar.length > 0) {
-            let rebarData = [["ID", "Description", "Length (cm)"]];
-            State.records.rebar.forEach((r,i) => rebarData.push([`R${i+1}`, r.desc, r.realLen.toFixed(2)]));
-            const wsRebar = XLSX.utils.aoa_to_sheet(rebarData);
-            wsRebar['!cols'] = [{wch: 10}, {wch: 40}, {wch: 15}];
-            XLSX.utils.book_append_sheet(wb, wsRebar, "Rebar");
+            const wsRebar = workbook.addWorksheet('Rebar');
+            wsRebar.columns = [
+                { header: 'ID', key: 'id', width: 10 },
+                { header: 'Description', key: 'desc', width: 40 },
+                { header: 'Length (cm)', key: 'l', width: 15 }
+            ];
+            wsRebar.getRow(1).font = { bold: true };
+            State.records.rebar.forEach((r,i) => {
+                wsRebar.addRow({id: `R${i+1}`, desc: r.desc, l: r.realLen.toFixed(2)});
+            });
         }
 
-        XLSX.writeFile(wb, `Inspection_Report_${bldg}_${loc}.xlsx`);
+        const buffer = await workbook.xlsx.writeBuffer();
+        saveAs(new Blob([buffer]), `Inspection_Report_${bldg}_${loc}.xlsx`);
         showToast('ส่งออกไฟล์ Excel สำเร็จ', 'success');
     };
 
